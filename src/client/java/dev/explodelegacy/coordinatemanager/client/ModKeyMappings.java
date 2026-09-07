@@ -21,6 +21,8 @@ public final class ModKeyMappings {
     public static KeyMapping SAVE_LOCATION;
     public static KeyMapping OPEN_LIST;
 
+    public static KeyMapping TELEPORT_FAVORITE;
+
     public static void init() {
 
         /*
@@ -58,6 +60,16 @@ public final class ModKeyMappings {
                                 "key.coordinate.open_list",
                                 InputConstants.Type.KEYSYM,
                                 InputConstants.KEY_L,
+                                COORDINATE_CATEGORY
+                        )
+                );
+
+        TELEPORT_FAVORITE =
+                KeyMappingHelper.registerKeyMapping(
+                        new KeyMapping(
+                                "key.coordinate.teleport_favorite",
+                                InputConstants.Type.KEYSYM,
+                                InputConstants.KEY_H,
                                 COORDINATE_CATEGORY
                         )
                 );

@@ -80,6 +80,14 @@ public final class ModClientTicker {
                     );
                 }
             }
+            while (ModKeyMappings.TELEPORT_FAVORITE.consumeClick()) {
+
+                if (client.player != null
+                        && client.getConnection() != null) {
+
+                    client.getConnection().sendCommand("tc");
+                }
+            }
         });
     }
 

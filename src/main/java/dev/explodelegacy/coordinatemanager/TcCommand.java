@@ -1,16 +1,17 @@
 package dev.explodelegacy.coordinatemanager;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
+
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
-import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,6 +20,15 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public class TcCommand {
+
+    // ============================================================
+    // SAVED LOCATION SUGGESTIONS
+    //
+    // /tc #<TAB>
+    //
+    // Alphabetic names first.
+    // Numeric / '-' names afterwards.
+    // ============================================================
 
     private static final SuggestionProvider<CommandSourceStack>
             SAVED_LOCATION_SUGGESTIONS =
@@ -30,7 +40,9 @@ public class TcCommand {
                     player =
                             context.getSource()
                                     .getPlayerOrException();
+
                 } catch (Exception ignored) {
+
                     return CompletableFuture.completedFuture(
                             builder.build()
                     );
@@ -41,15 +53,6 @@ public class TcCommand {
                                 player.getUUID()
                         );
 
-                /*
-                 * Sort saved locations:
-                 *
-                 * 1. Names starting with letters first
-                 * 2. Names starting with numbers,
-                 *    '-' or other characters after
-                 *
-                 * Alphabetical order within each group.
-                 */
                 List<String> names =
                         new ArrayList<>(
                                 locations.keySet()
@@ -79,12 +82,9 @@ public class TcCommand {
                                 )
                 );
 
-                /*
-                 * Add @ back for command suggestions.
-                 */
                 List<String> suggestions =
                         names.stream()
-                                .map(name -> "@" + name)
+                                .map(name -> "#" + name)
                                 .toList();
 
                 return SharedSuggestionProvider.suggest(
@@ -93,6 +93,125 @@ public class TcCommand {
                 );
             };
 
+
+    // ============================================================
+    // PLAYER SUGGESTIONS
+    //
+    // /tc @<TAB>
+    // ============================================================
+
+    private static final SuggestionProvider<CommandSourceStack>
+            PLAYER_SUGGESTIONS =
+            (context, builder) -> {
+
+                List<String> suggestions =
+                        context.getSource()
+                                .getOnlinePlayerNames()
+                                .stream()
+                                .map(name -> "@" + name)
+                                .sorted(
+                                        String.CASE_INSENSITIVE_ORDER
+                                )
+                                .toList();
+
+                return SharedSuggestionProvider.suggest(
+                        suggestions,
+                        builder
+                );
+            };
+
+
+    // ============================================================
+    // PLAYER OR SAVED LOCATION SUGGESTIONS
+    //
+    // /tc @Steve @<TAB>
+    // /tc @Steve #<TAB>
+    // ============================================================
+
+    private static final SuggestionProvider<CommandSourceStack>
+            PLAYER_OR_SAVED_SUGGESTIONS =
+            (context, builder) -> {
+
+                List<String> suggestions =
+                        new ArrayList<>();
+
+                /*
+                 * Online players
+                 */
+                for (String name :
+                        context.getSource()
+                                .getOnlinePlayerNames()) {
+
+                    suggestions.add(
+                            "@" + name
+                    );
+                }
+
+                /*
+                 * Saved locations
+                 */
+                try {
+
+                    ServerPlayer player =
+                            context.getSource()
+                                    .getPlayerOrException();
+
+                    Map<String, SavedLocations.Entry>
+                            locations =
+                            SavedLocations.all(
+                                    player.getUUID()
+                            );
+
+                    List<String> names =
+                            new ArrayList<>(
+                                    locations.keySet()
+                            );
+
+                    names.sort(
+                            Comparator
+                                    .comparing(
+                                            (String name) -> {
+
+                                                if (name == null
+                                                        || name.isEmpty()) {
+                                                    return 1;
+                                                }
+
+                                                char first =
+                                                        name.charAt(0);
+
+                                                return Character.isLetter(first)
+                                                        ? 0
+                                                        : 1;
+                                            }
+                                    )
+                                    .thenComparing(
+                                            String::toString,
+                                            String.CASE_INSENSITIVE_ORDER
+                                    )
+                    );
+
+                    for (String name : names) {
+
+                        suggestions.add(
+                                "#" + name
+                        );
+                    }
+
+                } catch (Exception ignored) {
+                }
+
+                return SharedSuggestionProvider.suggest(
+                        suggestions,
+                        builder
+                );
+            };
+
+
+    // ============================================================
+    // COMMAND REGISTRATION
+    // ============================================================
+
     public static void register(
             CommandDispatcher<CommandSourceStack> dispatcher
     ) {
@@ -100,18 +219,20 @@ public class TcCommand {
         dispatcher.register(
                 Commands.literal("tc")
 
-                        /*
-                         * /tc
-                         *
-                         * Teleport to favourite.
-                         */
+                        // ------------------------------------------------
+                        // /tc
+                        // Teleport yourself to favourite
+                        // ------------------------------------------------
+
                         .executes(
                                 TcCommand::executeFavorite
                         )
 
-                        /*
-                         * /tc save <name>
-                         */
+
+                        // ------------------------------------------------
+                        // /tc save <name>
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.literal("save")
                                         .then(
@@ -125,9 +246,11 @@ public class TcCommand {
                                         )
                         )
 
-                        /*
-                         * /tc remove <name>
-                         */
+
+                        // ------------------------------------------------
+                        // /tc remove <name>
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.literal("remove")
                                         .then(
@@ -141,9 +264,11 @@ public class TcCommand {
                                         )
                         )
 
-                        /*
-                         * /tc list
-                         */
+
+                        // ------------------------------------------------
+                        // /tc list
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.literal("list")
                                         .executes(
@@ -151,9 +276,11 @@ public class TcCommand {
                                         )
                         )
 
-                        /*
-                         * /tc rename <old> <new>
-                         */
+
+                        // ------------------------------------------------
+                        // /tc rename <old> <new>
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.literal("rename")
                                         .then(
@@ -173,9 +300,11 @@ public class TcCommand {
                                         )
                         )
 
-                        /*
-                         * /tc favorite <name>
-                         */
+
+                        // ------------------------------------------------
+                        // /tc favorite <name>
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.literal("favorite")
                                         .then(
@@ -189,46 +318,106 @@ public class TcCommand {
                                         )
                         )
 
-                        /*
-                         * /tc <x> <y> <z>
-                         */
+
+                        // ------------------------------------------------
+                        // /tc <x> <y> <z>
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.argument(
-                                                "pos",
-                                                Vec3Argument.vec3()
+                                                "x",
+                                                DoubleArgumentType.doubleArg()
                                         )
-                                        .executes(
-                                                TcCommand::executeTeleportCoords
+                                        .then(
+                                                Commands.argument(
+                                                                "y",
+                                                                DoubleArgumentType.doubleArg()
+                                                        )
+                                                        .then(
+                                                                Commands.argument(
+                                                                                "z",
+                                                                                DoubleArgumentType.doubleArg()
+                                                                        )
+                                                                        .executes(
+                                                                                TcCommand::executeTeleportCoords
+                                                                        )
+                                                        )
                                         )
                         )
 
-                        /*
-                         * /tc @name
-                         *
-                         * greedyString() allows '@'.
-                         */
+
+                        // ------------------------------------------------
+                        // /tc @player
+                        // /tc #saved
+                        // ------------------------------------------------
+
                         .then(
                                 Commands.argument(
-                                                "saved",
-                                                StringArgumentType.greedyString()
+                                                "target",
+                                                StringArgumentType.word()
                                         )
                                         .suggests(
-                                                SAVED_LOCATION_SUGGESTIONS
+                                                PLAYER_OR_SAVED_SUGGESTIONS
                                         )
                                         .executes(
-                                                TcCommand::executeTeleportSaved
+                                                TcCommand::executeTeleportTarget
+                                        )
+
+                                        // --------------------------------
+                                        // /tc @player @player
+                                        // /tc @player #saved
+                                        // --------------------------------
+
+                                        .then(
+                                                Commands.argument(
+                                                                "destination",
+                                                                StringArgumentType.word()
+                                                        )
+                                                        .suggests(
+                                                                PLAYER_OR_SAVED_SUGGESTIONS
+                                                        )
+                                                        .executes(
+                                                                TcCommand::executeTeleportTargetToTarget
+                                                        )
+                                        )
+
+                                        // --------------------------------
+                                        // /tc @player <x> <y> <z>
+                                        // --------------------------------
+
+                                        .then(
+                                                Commands.argument(
+                                                                "x",
+                                                                DoubleArgumentType.doubleArg()
+                                                        )
+                                                        .then(
+                                                                Commands.argument(
+                                                                                "y",
+                                                                                DoubleArgumentType.doubleArg()
+                                                                        )
+                                                                        .then(
+                                                                                Commands.argument(
+                                                                                                "z",
+                                                                                                DoubleArgumentType.doubleArg()
+                                                                                        )
+                                                                                        .executes(
+                                                                                                TcCommand::executeTeleportPlayerToCoords
+                                                                                        )
+                                                                        )
+                                                        )
                                         )
                         )
         );
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeFavorite(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -275,7 +464,7 @@ public class TcCommand {
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
-                        "Teleported to favourite @"
+                        "Teleported to favourite #"
                                 + favoriteName
                                 + "  "
                                 + coordinates(entry)
@@ -286,13 +475,14 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc save
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeSave(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -310,9 +500,14 @@ public class TcCommand {
                         .identifier()
                         .toString();
 
-        double x = player.getX();
-        double y = player.getY();
-        double z = player.getZ();
+        double x =
+                player.getX();
+
+        double y =
+                player.getY();
+
+        double z =
+                player.getZ();
 
         SavedLocations.set(
                 player.getUUID(),
@@ -325,7 +520,8 @@ public class TcCommand {
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
-                        "Saved @" + name
+                        "Saved #"
+                                + name
                                 + "  "
                                 + coordinates(x, y, z)
                 ),
@@ -335,13 +531,14 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc remove
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeRemove(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -353,12 +550,19 @@ public class TcCommand {
                         "name"
                 );
 
+        /*
+         * Get the entry BEFORE removing it so we can
+         * display its coordinates.
+         */
         SavedLocations.Entry entry =
                 SavedLocations.get(
                         player.getUUID(),
                         name
                 );
 
+        /*
+         * Your SavedLocations.remove() returns boolean.
+         */
         boolean removed =
                 SavedLocations.remove(
                         player.getUUID(),
@@ -367,14 +571,14 @@ public class TcCommand {
 
         if (removed) {
 
-            SavedLocations.Entry removedEntry = entry;
-
             ctx.getSource().sendSuccess(
                     () -> Component.literal(
-                            "Removed @" + name
+                            "Removed #"
+                                    + name
                                     + (
-                                    removedEntry != null
-                                            ? "  " + coordinates(removedEntry)
+                                    entry != null
+                                            ? "  "
+                                            + coordinates(entry)
                                             : ""
                             )
                     ),
@@ -386,20 +590,21 @@ public class TcCommand {
 
         ctx.getSource().sendFailure(
                 Component.literal(
-                        "No saved location named @" + name
-                )
-        );
+                        "No saved location named #"
+                                + name
+                ));
 
         return 0;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc list
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeList(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -434,8 +639,49 @@ public class TcCommand {
                 false
         );
 
-        for (Map.Entry<String, SavedLocations.Entry> location
-                : all.entrySet()) {
+        /*
+         * Same ordering as GUI and TAB:
+         *
+         * alphabetic names first
+         * numeric / '-' names afterwards
+         */
+        List<Map.Entry<String, SavedLocations.Entry>>
+                locations =
+                new ArrayList<>(
+                        all.entrySet()
+                );
+
+        locations.sort(
+                Comparator
+                        .comparing(
+                                (Map.Entry<String, SavedLocations.Entry> entry) -> {
+
+                                    String name =
+                                            entry.getKey();
+
+                                    if (name == null
+                                            || name.isEmpty()) {
+                                        return 1;
+                                    }
+
+                                    char first =
+                                            name.charAt(0);
+
+                                    return Character.isLetter(first)
+                                            ? 0
+                                            : 1;
+                                }
+                        )
+                        .thenComparing(
+                                entry -> entry.getKey(),
+                                String.CASE_INSENSITIVE_ORDER
+                        )
+        );
+
+        for (
+                Map.Entry<String, SavedLocations.Entry> location
+                : locations
+        ) {
 
             String name =
                     location.getKey();
@@ -454,7 +700,7 @@ public class TcCommand {
             ctx.getSource().sendSuccess(
                     () -> Component.literal(
                             prefix
-                                    + "@"
+                                    + "#"
                                     + name
                                     + "  "
                                     + coordinates(entry)
@@ -466,7 +712,7 @@ public class TcCommand {
         String favoriteText =
                 favorite == null
                         ? "(none)"
-                        : "@" + favorite;
+                        : "#" + favorite;
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
@@ -479,13 +725,14 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc rename
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeRename(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -503,12 +750,19 @@ public class TcCommand {
                         "new"
                 );
 
+        /*
+         * Get old entry BEFORE renaming so we can
+         * display the coordinates.
+         */
         SavedLocations.Entry entry =
                 SavedLocations.get(
                         player.getUUID(),
                         oldName
                 );
 
+        /*
+         * Your SavedLocations.rename() returns boolean.
+         */
         boolean renamed =
                 SavedLocations.rename(
                         player.getUUID(),
@@ -520,13 +774,14 @@ public class TcCommand {
 
             ctx.getSource().sendSuccess(
                     () -> Component.literal(
-                            "Renamed @"
+                            "Renamed #"
                                     + oldName
-                                    + " to @"
+                                    + " to #"
                                     + newName
                                     + (
                                     entry != null
-                                            ? "  " + coordinates(entry)
+                                            ? "  "
+                                            + coordinates(entry)
                                             : ""
                             )
                     ),
@@ -538,20 +793,22 @@ public class TcCommand {
 
         ctx.getSource().sendFailure(
                 Component.literal(
-                        "Could not rename @" + oldName
+                        "Could not rename #"
+                                + oldName
                 )
         );
 
         return 0;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc favorite
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeFavoriteSet(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
@@ -579,7 +836,8 @@ public class TcCommand {
 
             ctx.getSource().sendFailure(
                     Component.literal(
-                            "No saved location named @" + name
+                            "No saved location named #"
+                                    + name
                     )
             );
 
@@ -588,7 +846,7 @@ public class TcCommand {
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
-                        "Favourite set to @"
+                        "Favourite set to #"
                                 + name
                                 + "  "
                                 + coordinates(entry)
@@ -599,78 +857,359 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
-    // /tc @name
-    // ------------------------------------------------------------
 
-    private static int executeTeleportSaved(
+    // ============================================================
+    // /tc @player
+    // /tc #saved
+    // ============================================================
+
+    private static int executeTeleportTarget(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
-        ServerPlayer player =
+        ServerPlayer source =
                 ctx.getSource()
                         .getPlayerOrException();
 
-        String input =
+        String target =
                 StringArgumentType.getString(
                         ctx,
-                        "saved"
+                        "target"
                 );
 
-        if (!input.startsWith("@")) {
+        /*
+         * ========================================================
+         * #saved
+         *
+         * Yourself -> saved location
+         * ========================================================
+         */
+        if (target.startsWith("#")) {
 
-            ctx.getSource().sendFailure(
-                    Component.literal(
-                            "Use /tc @name for a saved location."
-                    )
-            );
+            String name =
+                    target.substring(1);
 
-            return 0;
-        }
+            if (name.isBlank()) {
 
-        String name =
-                input.substring(1);
-
-        if (name.isBlank()) {
-
-            ctx.getSource().sendFailure(
-                    Component.literal(
-                            "Saved location name cannot be empty."
-                    )
-            );
-
-            return 0;
-        }
-
-        SavedLocations.Entry entry =
-                SavedLocations.get(
-                        player.getUUID(),
-                        name
+                ctx.getSource().sendFailure(
+                        Component.literal(
+                                "Saved location name cannot be empty."
+                        )
                 );
 
-        if (entry == null) {
+                return 0;
+            }
+
+            SavedLocations.Entry entry =
+                    SavedLocations.get(
+                            source.getUUID(),
+                            name
+                    );
+
+            if (entry == null) {
+
+                ctx.getSource().sendFailure(
+                        Component.literal(
+                                "No saved location named #"
+                                        + name
+                        )
+                );
+
+                return 0;
+            }
+
+            source.teleportTo(
+                    entry.x,
+                    entry.y,
+                    entry.z
+            );
+
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(
+                            "Teleported to #"
+                                    + name
+                                    + "  "
+                                    + coordinates(entry)
+                    ),
+                    false
+            );
+
+            return 1;
+        }
+
+
+        /*
+         * ========================================================
+         * @player
+         *
+         * Yourself -> player
+         * ========================================================
+         */
+        if (target.startsWith("@")) {
+
+            String playerName =
+                    target.substring(1);
+
+            ServerPlayer destination =
+                    findPlayer(
+                            ctx,
+                            playerName
+                    );
+
+            if (destination == null) {
+                return 0;
+            }
+
+            source.teleportTo(
+                    destination.getX(),
+                    destination.getY(),
+                    destination.getZ()
+            );
+
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(
+                            "Teleported to @"
+                                    + destination
+                                    .getGameProfile()
+                                    .name()
+                    ),
+                    false
+            );
+
+            return 1;
+        }
+
+        ctx.getSource().sendFailure(
+                Component.literal(
+                        "Use @player or #saved-location."
+                )
+        );
+
+        return 0;
+    }
+
+
+    // ============================================================
+    // /tc @player @player
+    // /tc @player #saved
+    // ============================================================
+
+    private static int executeTeleportTargetToTarget(
+            CommandContext<CommandSourceStack> ctx
+    ) throws CommandSyntaxException {
+
+        String targetInput =
+                StringArgumentType.getString(
+                        ctx,
+                        "target"
+                );
+
+        String destinationInput =
+                StringArgumentType.getString(
+                        ctx,
+                        "destination"
+                );
+
+        /*
+         * First argument must be @player.
+         */
+        if (!targetInput.startsWith("@")) {
 
             ctx.getSource().sendFailure(
                     Component.literal(
-                            "No saved location named @" + name
+                            "The first target must be @player."
                     )
             );
 
             return 0;
         }
 
-        player.teleportTo(
-                entry.x,
-                entry.y,
-                entry.z
+        ServerPlayer target =
+                findPlayer(
+                        ctx,
+                        targetInput.substring(1)
+                );
+
+        if (target == null) {
+            return 0;
+        }
+
+
+        /*
+         * ========================================================
+         * @player -> @player
+         * ========================================================
+         */
+        if (destinationInput.startsWith("@")) {
+
+            ServerPlayer destination =
+                    findPlayer(
+                            ctx,
+                            destinationInput.substring(1)
+                    );
+
+            if (destination == null) {
+                return 0;
+            }
+
+            target.teleportTo(
+                    destination.getX(),
+                    destination.getY(),
+                    destination.getZ()
+            );
+
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(
+                            "Teleported @"
+                                    + target
+                                    .getGameProfile()
+                                    .name()
+                                    + " to @"
+                                    + destination
+                                    .getGameProfile()
+                                    .name()
+                    ),
+                    false
+            );
+
+            return 1;
+        }
+
+
+        /*
+         * ========================================================
+         * @player -> #saved
+         *
+         * Saved location belongs to command executor.
+         * ========================================================
+         */
+        if (destinationInput.startsWith("#")) {
+
+            String name =
+                    destinationInput.substring(1);
+
+            ServerPlayer source =
+                    ctx.getSource()
+                            .getPlayerOrException();
+
+            SavedLocations.Entry entry =
+                    SavedLocations.get(
+                            source.getUUID(),
+                            name
+                    );
+
+            if (entry == null) {
+
+                ctx.getSource().sendFailure(
+                        Component.literal(
+                                "No saved location named #"
+                                        + name
+                        )
+                );
+
+                return 0;
+            }
+
+            target.teleportTo(
+                    entry.x,
+                    entry.y,
+                    entry.z
+            );
+
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(
+                            "Teleported @"
+                                    + target
+                                    .getGameProfile()
+                                    .name()
+                                    + " to #"
+                                    + name
+                                    + "  "
+                                    + coordinates(entry)
+                    ),
+                    false
+            );
+
+            return 1;
+        }
+
+        ctx.getSource().sendFailure(
+                Component.literal(
+                        "Destination must be @player or #saved-location."
+                )
+        );
+
+        return 0;
+    }
+
+
+    // ============================================================
+    // /tc @player <x> <y> <z>
+    // ============================================================
+
+    private static int executeTeleportPlayerToCoords(
+            CommandContext<CommandSourceStack> ctx
+    ) throws CommandSyntaxException {
+
+        String targetInput =
+                StringArgumentType.getString(
+                        ctx,
+                        "target"
+                );
+
+        if (!targetInput.startsWith("@")) {
+
+            ctx.getSource().sendFailure(
+                    Component.literal(
+                            "The target must be @player."
+                    )
+            );
+
+            return 0;
+        }
+
+        ServerPlayer target =
+                findPlayer(
+                        ctx,
+                        targetInput.substring(1)
+                );
+
+        if (target == null) {
+            return 0;
+        }
+
+        double x =
+                DoubleArgumentType.getDouble(
+                        ctx,
+                        "x"
+                );
+
+        double y =
+                DoubleArgumentType.getDouble(
+                        ctx,
+                        "y"
+                );
+
+        double z =
+                DoubleArgumentType.getDouble(
+                        ctx,
+                        "z"
+                );
+
+        target.teleportTo(
+                x,
+                y,
+                z
         );
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
-                        "Teleported to @"
-                                + name
-                                + "  "
-                                + coordinates(entry)
+                        "Teleported @"
+                                + target
+                                .getGameProfile()
+                                .name()
+                                + " to "
+                                + coordinates(x, y, z)
                 ),
                 false
         );
@@ -678,37 +1217,50 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
+
+    // ============================================================
     // /tc <x> <y> <z>
-    // ------------------------------------------------------------
+    // ============================================================
 
     private static int executeTeleportCoords(
             CommandContext<CommandSourceStack> ctx
-    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    ) throws CommandSyntaxException {
 
         ServerPlayer player =
                 ctx.getSource()
                         .getPlayerOrException();
 
-        Vec3 pos =
-                Vec3Argument.getVec3(
+        double x =
+                DoubleArgumentType.getDouble(
                         ctx,
-                        "pos"
+                        "x"
+                );
+
+        double y =
+                DoubleArgumentType.getDouble(
+                        ctx,
+                        "y"
+                );
+
+        double z =
+                DoubleArgumentType.getDouble(
+                        ctx,
+                        "z"
                 );
 
         player.teleportTo(
-                pos.x,
-                pos.y,
-                pos.z
+                x,
+                y,
+                z
         );
 
         ctx.getSource().sendSuccess(
                 () -> Component.literal(
                         "Teleported to "
                                 + coordinates(
-                                pos.x,
-                                pos.y,
-                                pos.z
+                                x,
+                                y,
+                                z
                         )
                 ),
                 false
@@ -717,9 +1269,52 @@ public class TcCommand {
         return 1;
     }
 
-    // ------------------------------------------------------------
-    // Coordinate formatting
-    // ------------------------------------------------------------
+
+    // ============================================================
+    // FIND ONLINE PLAYER
+    // ============================================================
+
+    private static ServerPlayer findPlayer(
+            CommandContext<CommandSourceStack> ctx,
+            String name
+    ) {
+
+        if (name == null || name.isBlank()) {
+
+            ctx.getSource().sendFailure(
+                    Component.literal(
+                            "Player name cannot be empty."
+                    )
+            );
+
+            return null;
+        }
+
+        ServerPlayer player =
+                ctx.getSource()
+                        .getServer()
+                        .getPlayerList()
+                        .getPlayerByName(name);
+
+        if (player == null) {
+
+            ctx.getSource().sendFailure(
+                    Component.literal(
+                            "Player @" + name
+                                    + " is not online."
+                    )
+            );
+
+            return null;
+        }
+
+        return player;
+    }
+
+
+    // ============================================================
+    // COORDINATE FORMATTING
+    // ============================================================
 
     private static String coordinates(
             SavedLocations.Entry entry
@@ -731,6 +1326,7 @@ public class TcCommand {
                 entry.z
         );
     }
+
 
     private static String coordinates(
             double x,
@@ -745,6 +1341,7 @@ public class TcCommand {
                 + "  Z: "
                 + formatNumber(z);
     }
+
 
     private static String formatNumber(
             double value

@@ -5,5 +5,6 @@
 
   "key.coordinate.save_location": "Save current location",
 
-  "key.coordinate.open_list": "Open saved locations"
+  "key.coordinate.open_list": "Open saved locations",
+  "key.coordinate.teleport_favorite": "Teleport to favourite"
 }
